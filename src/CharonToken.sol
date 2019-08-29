@@ -1,255 +1,249 @@
 /**
- *Submitted for verification at Etherscan.io on 2019-07-23
+ *Submitted for verification at Etherscan.io on 2019-07-20
 */
 
-pragma solidity >=0.4.22 <0.6.0;
+pragma solidity ^0.4.12;
 
-contract owned {
-    address public owner;
-
-    constructor() public {
-        owner = msg.sender;
-    }
-
-    modifier onlyOwner {
-        require(msg.sender == owner);
-        _;
-    }
-
-    function transferOwnership(address newOwner) onlyOwner public {
-        owner = newOwner;
-    }
-    
+contract IMigrationContract {
+    function migrate(address addr, uint256 nas) returns (bool success);
 }
 
-interface tokenRecipient { function receiveApproval(address _from, uint256 _value, address _token, bytes calldata _extraData) external; }
+/* taking ideas from FirstBlood token */
+contract SafeMath {
+    /* function assert(bool assertion) internal { */
+    /*   if (!assertion) { */
+    /*     throw; */
+    /*   } */
+    /* }      // assert no longer needed once solidity is on 0.4.10 */
 
-contract TokenERC20 {
-    // Public variables of the token
-    string public name;
-    string public symbol;
-    uint8 public decimals = 18;
-    // 18 decimals is the strongly suggested default, avoid changing it
+
+    function safeAdd(uint256 x, uint256 y) internal returns(uint256) {
+        uint256 z = x + y;
+        assert((z >= x) && (z >= y));
+        return z;
+    }
+
+    function safeSubtract(uint256 x, uint256 y) internal returns(uint256) {
+        assert(x >= y);
+        uint256 z = x - y;
+        return z;
+    }
+
+    function safeMult(uint256 x, uint256 y) internal returns(uint256) {
+        uint256 z = x * y;
+        assert((x == 0)||(z/x == y));
+        return z;
+    }
+
+}
+
+contract Token {
     uint256 public totalSupply;
-
-    // This creates an array with all balances
-    mapping (address => uint256) public balanceOf;
-    mapping (address => mapping (address => uint256)) public allowance;
-
-    // This generates a public event on the blockchain that will notify clients
-    event Transfer(address indexed from, address indexed to, uint256 value);
-    
-    // This generates a public event on the blockchain that will notify clients
+    function balanceOf(address _owner) constant returns (uint256 balance);
+    function transfer(address _to, uint256 _value) returns (bool success);
+    function transferFrom(address _from, address _to, uint256 _value) returns (bool success);
+    function approve(address _spender, uint256 _value) returns (bool success);
+    function allowance(address _owner, address _spender) constant returns (uint256 remaining);
+    event Transfer(address indexed _from, address indexed _to, uint256 _value);
     event Approval(address indexed _owner, address indexed _spender, uint256 _value);
+}
 
-    // This notifies clients about the amount burnt
-    event Burn(address indexed from, uint256 value);
 
-    /**
-     * Constrctor function
-     *
-     * Initializes contract with initial supply tokens to the creator of the contract
-     */
-    constructor(
-        uint256 initialSupply,
-        string memory tokenName,
-        string memory tokenSymbol
-    ) public {
-        totalSupply = initialSupply * 10 ** uint256(decimals);  // Update total supply with the decimal amount
-        balanceOf[msg.sender] = totalSupply;                    // Give the creator all initial tokens
-        name = tokenName;                                       // Set the name for display purposes
-        symbol = tokenSymbol;                                   // Set the symbol for display purposes
-    }
+/*  ERC 20 token */
+contract StandardToken is Token {
 
-    /**
-     * Internal transfer, only can be called by this contract
-     */
-    function _transfer(address _from, address _to, uint _value) internal {
-        // Prevent transfer to 0x0 address. Use burn() instead
-        require(_to != address(0x0));
-        // Check if the sender has enough
-        require(balanceOf[_from] >= _value);
-        // Check for overflows
-        require(balanceOf[_to] + _value > balanceOf[_to]);
-        // Save this for an assertion in the future
-        uint previousBalances = balanceOf[_from] + balanceOf[_to];
-        // Subtract from the sender
-        balanceOf[_from] -= _value;
-        // Add the same to the recipient
-        balanceOf[_to] += _value;
-        emit Transfer(_from, _to, _value);
-        // Asserts are used to use static analysis to find bugs in your code. They should never fail
-        assert(balanceOf[_from] + balanceOf[_to] == previousBalances);
-    }
-
-    /**
-     * Transfer tokens
-     *
-     * Send `_value` tokens to `_to` from your account
-     *
-     * @param _to The address of the recipient
-     * @param _value the amount to send
-     */
-    function transfer(address _to, uint256 _value) public returns (bool success) {
-        _transfer(msg.sender, _to, _value);
-        return true;
-    }
-
-    /**
-     * Transfer tokens from other address
-     *
-     * Send `_value` tokens to `_to` in behalf of `_from`
-     *
-     * @param _from The address of the sender
-     * @param _to The address of the recipient
-     * @param _value the amount to send
-     */
-    function transferFrom(address _from, address _to, uint256 _value) public returns (bool success) {
-        require(_value <= allowance[_from][msg.sender]);     // Check allowance
-        allowance[_from][msg.sender] -= _value;
-        _transfer(_from, _to, _value);
-        return true;
-    }
-
-    /**
-     * Set allowance for other address
-     *
-     * Allows `_spender` to spend no more than `_value` tokens in your behalf
-     *
-     * @param _spender The address authorized to spend
-     * @param _value the max amount they can spend
-     */
-    function approve(address _spender, uint256 _value) public
-        returns (bool success) {
-        allowance[msg.sender][_spender] = _value;
-        emit Approval(msg.sender, _spender, _value);
-        return true;
-    }
-
-    /**
-     * Set allowance for other address and notify
-     *
-     * Allows `_spender` to spend no more than `_value` tokens in your behalf, and then ping the contract about it
-     *
-     * @param _spender The address authorized to spend
-     * @param _value the max amount they can spend
-     * @param _extraData some extra information to send to the approved contract
-     */
-    function approveAndCall(address _spender, uint256 _value, bytes memory _extraData)
-        public
-        returns (bool success) {
-        tokenRecipient spender = tokenRecipient(_spender);
-        if (approve(_spender, _value)) {
-            spender.receiveApproval(msg.sender, _value, address(this), _extraData);
+    function transfer(address _to, uint256 _value) returns (bool success) {
+        if (balances[msg.sender] >= _value && _value > 0) {
+            balances[msg.sender] -= _value;
+            balances[_to] += _value;
+            Transfer(msg.sender, _to, _value);
             return true;
+        } else {
+            return false;
         }
     }
 
-    /**
-     * Destroy tokens
-     *
-     * Remove `_value` tokens from the system irreversibly
-     *
-     * @param _value the amount of money to burn
-     */
-    function burn(uint256 _value) public returns (bool success) {
-        require(balanceOf[msg.sender] >= _value);   // Check if the sender has enough
-        balanceOf[msg.sender] -= _value;            // Subtract from the sender
-        totalSupply -= _value;                      // Updates totalSupply
-        emit Burn(msg.sender, _value);
+    function transferFrom(address _from, address _to, uint256 _value) returns (bool success) {
+        if (balances[_from] >= _value && allowed[_from][msg.sender] >= _value && _value > 0) {
+            balances[_to] += _value;
+            balances[_from] -= _value;
+            allowed[_from][msg.sender] -= _value;
+            Transfer(_from, _to, _value);
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    function balanceOf(address _owner) constant returns (uint256 balance) {
+        return balances[_owner];
+    }
+
+    function approve(address _spender, uint256 _value) returns (bool success) {
+        allowed[msg.sender][_spender] = _value;
+        Approval(msg.sender, _spender, _value);
         return true;
     }
 
-    /**
-     * Destroy tokens from other account
-     *
-     * Remove `_value` tokens from the system irreversibly on behalf of `_from`.
-     *
-     * @param _from the address of the sender
-     * @param _value the amount of money to burn
-     */
-    function burnFrom(address _from, uint256 _value) public returns (bool success) {
-        require(balanceOf[_from] >= _value);                // Check if the targeted balance is enough
-        require(_value <= allowance[_from][msg.sender]);    // Check allowance
-        balanceOf[_from] -= _value;                         // Subtract from the targeted balance
-        allowance[_from][msg.sender] -= _value;             // Subtract from the sender's allowance
-        totalSupply -= _value;                              // Update totalSupply
-        emit Burn(_from, _value);
-        return true;
+    function allowance(address _owner, address _spender) constant returns (uint256 remaining) {
+        return allowed[_owner][_spender];
     }
+
+    mapping (address => uint256) balances;
+    mapping (address => mapping (address => uint256)) allowed;
 }
 
-/******************************************/
-/*       ADVANCED TOKEN STARTS HERE       */
-/******************************************/
+contract CRTToken is StandardToken, SafeMath {
 
-contract MyAdvancedToken is owned, TokenERC20 {
+    // metadata
+    string  public constant name = "CharonToken";
+    string  public constant symbol = "CRT";
+    uint256 public constant decimals = 18;
+    string  public version = "1.0";
 
-    uint256 public sellPrice;
-    uint256 public buyPrice;
+    // contracts
+    address public ethFundDeposit;          // deposit address for ETH for Nebulas Team.
+    address public newContractAddr;         // the new contract for nebulas token updates;
 
-    mapping (address => bool) public frozenAccount;
+    // crowdsale parameters
+    bool    public isFunding;                // switched to true in operational state
+    uint256 public fundingStartBlock;
+    uint256 public fundingStopBlock;
 
-    /* This generates a public event on the blockchain that will notify clients */
-    event FrozenFunds(address target, bool frozen);
+    uint256 public currentSupply;           // current supply tokens for sell
+    uint256 public tokenRaised = 0;         // the number of total sold token
+    uint256 public tokenMigrated = 0;      // the number of total transferted token
+    uint256 public tokenExchangeRate = 625;              // 625 NAS tokens per 1 ETH
 
-    /* Initializes contract with initial supply tokens to the creator of the contract */
-    constructor(
-        uint256 initialSupply,
-        string memory tokenName,
-        string memory tokenSymbol
-    ) TokenERC20(initialSupply, tokenName, tokenSymbol) public {}
+    // events
+    event AllocateToken(address indexed _to, uint256 _value);    // allocate token for private sale;
+    event IssueToken(address indexed _to, uint256 _value);      // issue token for public sale;
+    event IncreaseSupply(uint256 _value);
+    event DecreaseSupply(uint256 _value);
+    event Migrate(address indexed _to, uint256 _value);
 
-    /* Internal transfer, only can be called by this contract */
-    function _transfer(address _from, address _to, uint _value) internal {
-        require (_to != address(0x0));                          // Prevent transfer to 0x0 address. Use burn() instead
-        require (balanceOf[_from] >= _value);                   // Check if the sender has enough
-        require (balanceOf[_to] + _value >= balanceOf[_to]);    // Check for overflows
-        require(!frozenAccount[_from]);                         // Check if sender is frozen
-        require(!frozenAccount[_to]);                           // Check if recipient is frozen
-        balanceOf[_from] -= _value;                             // Subtract from the sender
-        balanceOf[_to] += _value;                               // Add the same to the recipient
-        emit Transfer(_from, _to, _value);
+
+    function formatDecimals(uint256 _value) internal returns (uint256 ) {
+        return _value * 10 ** decimals;
     }
 
-    /// @notice Create `mintedAmount` tokens and send it to `target`
-    /// @param target Address to receive the tokens
-    /// @param mintedAmount the amount of tokens it will receive
-    function mintToken(address target, uint256 mintedAmount) onlyOwner public {
-        balanceOf[target] += mintedAmount;
-        totalSupply += mintedAmount;
-        emit Transfer(address(0), address(this), mintedAmount);
-        emit Transfer(address(this), target, mintedAmount);
+    // constructor
+    function CRTToken(
+        address _ethFundDeposit,
+        uint256 _currentSupply)
+    {
+        ethFundDeposit = _ethFundDeposit;
+
+        isFunding = false;                          //controls pre through crowdsale state
+        fundingStartBlock = 0;
+        fundingStopBlock = 0;
+
+        currentSupply = formatDecimals(_currentSupply);
+        totalSupply = formatDecimals(145800000);
+        balances[msg.sender] = totalSupply;
+        if(currentSupply > totalSupply) throw;
     }
 
-    /// @notice `freeze? Prevent | Allow` `target` from sending & receiving tokens
-    /// @param target Address to be frozen
-    /// @param freeze either to freeze it or not
-    function freezeAccount(address target, bool freeze) onlyOwner public {
-        frozenAccount[target] = freeze;
-        emit FrozenFunds(target, freeze);
+    modifier isOwner()  { require(msg.sender == ethFundDeposit); _; }
+
+    /// @dev set the token's tokenExchangeRate,
+    function setTokenExchangeRate(uint256 _tokenExchangeRate) isOwner external {
+        if (_tokenExchangeRate == 0) throw;
+        if (_tokenExchangeRate == tokenExchangeRate) throw;
+
+        tokenExchangeRate = _tokenExchangeRate;
     }
 
-    /// @notice Allow users to buy tokens for `newBuyPrice` eth and sell tokens for `newSellPrice` eth
-    /// @param newSellPrice Price the users can sell to the contract
-    /// @param newBuyPrice Price users can buy from the contract
-    function setPrices(uint256 newSellPrice, uint256 newBuyPrice) onlyOwner public {
-        sellPrice = newSellPrice;
-        buyPrice = newBuyPrice;
+
+    /// @dev decrease the token's supply
+    function decreaseSupply (uint256 _value) isOwner external {
+        uint256 value = formatDecimals(_value);
+        if (value + tokenRaised > currentSupply) throw;
+
+        currentSupply = safeSubtract(currentSupply, value);
+        DecreaseSupply(value);
     }
 
-    /// @notice Buy tokens from contract by sending ether
-    function buy() payable public {
-        uint amount = msg.value / buyPrice;                 // calculates the amount
-        _transfer(address(this), msg.sender, amount);       // makes the transfers
+    /// @dev turn on the funding state
+    function startFunding (uint256 _fundingStartBlock, uint256 _fundingStopBlock) isOwner external {
+        if (isFunding) throw;
+        if (_fundingStartBlock >= _fundingStopBlock) throw;
+        if (block.number >= _fundingStartBlock) throw;
+
+        fundingStartBlock = _fundingStartBlock;
+        fundingStopBlock = _fundingStopBlock;
+        isFunding = true;
     }
 
-    /// @notice Sell `amount` tokens to contract
-    /// @param amount amount of tokens to be sold
-    function sell(uint256 amount) public {
-        address myAddress = address(this);
-        require(myAddress.balance >= amount * sellPrice);   // checks if the contract has enough ether to buy
-        _transfer(msg.sender, address(this), amount);       // makes the transfers
-        msg.sender.transfer(amount * sellPrice);            // sends ether to the seller. It's important to do this last to avoid recursion attacks
+    /// @dev turn off the funding state
+    function stopFunding() isOwner external {
+        if (!isFunding) throw;
+        isFunding = false;
+    }
+
+    /// @dev set a new contract for recieve the tokens (for update contract)
+    function setMigrateContract(address _newContractAddr) isOwner external {
+        if (_newContractAddr == newContractAddr) throw;
+        newContractAddr = _newContractAddr;
+    }
+
+    /// @dev set a new owner.
+    function changeOwner(address _newFundDeposit) isOwner() external {
+        if (_newFundDeposit == address(0x0)) throw;
+        ethFundDeposit = _newFundDeposit;
+    }
+
+    /// sends the tokens to new contract
+    function migrate() external {
+        if(isFunding) throw;
+        if(newContractAddr == address(0x0)) throw;
+
+        uint256 tokens = balances[msg.sender];
+        if (tokens == 0) throw;
+
+        balances[msg.sender] = 0;
+        tokenMigrated = safeAdd(tokenMigrated, tokens);
+
+        IMigrationContract newContract = IMigrationContract(newContractAddr);
+        if (!newContract.migrate(msg.sender, tokens)) throw;
+
+        Migrate(msg.sender, tokens);               // log it
+    }
+
+    /// @dev sends ETH to Nebulas team
+    function transferETH() isOwner external {
+        if (this.balance == 0) throw;
+        if (!ethFundDeposit.send(this.balance)) throw;
+    }
+
+    /// @dev allocates NAS tokens to pre-sell address.
+    function allocateToken (address _addr, uint256 _eth) isOwner external {
+        if (_eth == 0) throw;
+        if (_addr == address(0x0)) throw;
+
+        uint256 tokens = safeMult(formatDecimals(_eth), tokenExchangeRate);
+        if (tokens + tokenRaised > currentSupply) throw;
+
+        tokenRaised = safeAdd(tokenRaised, tokens);
+        balances[_addr] += tokens;
+
+        AllocateToken(_addr, tokens);
+    }
+
+    /// buys the tokens
+    function () payable {
+        if (!isFunding) throw;
+        if (msg.value == 0) throw;
+
+        if (block.number < fundingStartBlock) throw;
+        if (block.number > fundingStopBlock) throw;
+
+        uint256 tokens = safeMult(msg.value, tokenExchangeRate);
+        if (tokens + tokenRaised > currentSupply) throw;
+
+        tokenRaised = safeAdd(tokenRaised, tokens);
+        balances[msg.sender] += tokens;
+
+        IssueToken(msg.sender, tokens);
     }
 }
